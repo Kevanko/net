@@ -1,59 +1,61 @@
 #include <iostream>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <cstring>
+
+#define BUFFER_SIZE 1024
 
 int main(int argc, char *argv[])
 {
-  if (argc != 4)
+  if (argc != 3)
   {
-    std::cerr << "Использование: " << argv[0] << " <IP сервера> <порт> <число i>" << std::endl;
+    std::cout << "Usage: " << argv[0] << " <server_ip> <server_port>" << std::endl;
     return 1;
   }
 
-  const char *server_ip = argv[1];
+  int sockfd;
+  struct sockaddr_in server_addr;
+  char buffer[BUFFER_SIZE];
   int server_port = atoi(argv[2]);
-  int i = atoi(argv[3]);
 
-  int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-  if (sockfd < 0)
+  // Создание UDP сокета
+  if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
   {
-    std::cerr << "Ошибка создания сокета" << std::endl;
+    std::cerr << "Socket creation failed" << std::endl;
     return 1;
   }
 
   // Настройка адреса сервера
-  sockaddr_in server_addr;
   memset(&server_addr, 0, sizeof(server_addr));
   server_addr.sin_family = AF_INET;
-  server_addr.sin_addr.s_addr = inet_addr(server_ip);
   server_addr.sin_port = htons(server_port);
+  if (inet_pton(AF_INET, argv[1], &server_addr.sin_addr) <= 0)
+  {
+    std::cerr << "Invalid address" << std::endl;
+    return 1;
+  }
 
-  // Цикл отправки
-  std::string message = std::to_string(i);
-  char buffer[1024];
-  for (int count = 0; count < 5; ++count)
-  { // Отправляем 5 раз
-    // Отправка числа i
-    sendto(sockfd, message.c_str(), message.length(), 0,
-           (sockaddr *)&server_addr, sizeof(server_addr));
+  // Цикл отправки чисел с задержкой
+  for (int i = 1; i <= 5; i++)
+  { // Отправляем числа 1, 2, 3, 4, 5 с задержкой i сек
+    snprintf(buffer, BUFFER_SIZE, "Number: %d", i);
+    sendto(sockfd, buffer, strlen(buffer), 0,
+           (struct sockaddr *)&server_addr, sizeof(server_addr));
+    std::cout << "Sent to server: " << buffer << std::endl;
 
-    // Получение ответа
-    socklen_t addr_len = sizeof(server_addr);
-    int bytes_received = recvfrom(sockfd, buffer, sizeof(buffer), 0, nullptr, nullptr);
-    if (bytes_received < 0)
+    // Получение ответа от сервера
+    int n = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, NULL, NULL);
+    if (n < 0)
     {
-      std::cerr << "Ошибка получения данных" << std::endl;
+      std::cerr << "Receive failed" << std::endl;
       continue;
     }
-    buffer[bytes_received] = '\0';
+    buffer[n] = '\0';
+    std::cout << "Received from server: " << buffer << std::endl;
 
-    std::cout << "Получено от сервера: " << buffer << std::endl;
-
-    // Задержка i секунд
-    sleep(i);
+    sleep(i); // Задержка в i секунд
   }
 
   close(sockfd);
