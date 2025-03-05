@@ -57,7 +57,6 @@ int main(int argc, char *argv[])
     printf("Отправлено число: %d (итерация %d)\n", number, i + 1);
     sleep(number);
   }
-
   close(sockfd);
   return 0;
 }
