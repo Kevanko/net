@@ -7,8 +7,8 @@ LDFLAGS = -lm
 # Имена исходных и бинарных файлов
 SERVER_SRC = server.cpp
 CLIENT_SRC = client.cpp
-SERVER_BIN = udp_server
-CLIENT_BIN = udp_client
+SERVER_BIN = server
+CLIENT_BIN = client
 
 # Цели по умолчанию
 all: $(SERVER_BIN) $(CLIENT_BIN)

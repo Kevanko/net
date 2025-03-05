@@ -1,80 +1,117 @@
-#include <iostream>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
 
-#define PORT 0 // Автоматический выбор свободного порта
-#define BUFFER_SIZE 1024
+#define BACKLOG 5 // Максимальное число ожидающих подключений
+
+// Обработчик сигнала SIGCHLD для очистки завершённых дочерних процессов (зомби)
+void sigchld_handler(int sig)
+{
+  while (waitpid(-1, NULL, WNOHANG) > 0)
+    ;
+}
+
+// Функция обработки клиента в дочернем процессе
+void handle_client(int client_sock)
+{
+  int number;
+  ssize_t bytes;
+  while ((bytes = read(client_sock, &number, sizeof(number))) > 0)
+  {
+    printf("Получено число: %d\n", number);
+    fflush(stdout);
+    // Имитация обработки: задержка на количество секунд, равное полученному числу
+    sleep(number);
+  }
+  close(client_sock);
+  exit(0);
+}
 
 int main()
 {
-  int sockfd;
+  int sockfd, client_sock;
   struct sockaddr_in server_addr, client_addr;
-  socklen_t addr_len = sizeof(client_addr);
-  char buffer[BUFFER_SIZE];
-  int port;
+  socklen_t addr_len;
 
-  // Создание UDP сокета
-  if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+  // Создаем TCP-сокет
+  sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (sockfd < 0)
   {
-    std::cerr << "Socket creation failed: " << strerror(errno) << std::endl;
-    return 1;
+    perror("Ошибка создания сокета");
+    exit(EXIT_FAILURE);
   }
-  std::cout << "Socket created successfully" << std::endl;
 
-  // Настройка адреса сервера
   memset(&server_addr, 0, sizeof(server_addr));
   server_addr.sin_family = AF_INET;
-  server_addr.sin_addr.s_addr = INADDR_ANY;
-  server_addr.sin_port = htons(PORT);
+  server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  server_addr.sin_port = 0;
 
-  // Привязка сокета
   if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
   {
-    std::cerr << "Bind failed: " << strerror(errno) << std::endl;
-    return 1;
+    perror("Ошибка привязки (bind)");
+    close(sockfd);
+    exit(EXIT_FAILURE);
   }
-  std::cout << "Bind successful" << std::endl;
-
-  // Получение назначенного порта
   addr_len = sizeof(server_addr);
   if (getsockname(sockfd, (struct sockaddr *)&server_addr, &addr_len) < 0)
   {
-    std::cerr << "Getsockname failed: " << strerror(errno) << std::endl;
-    return 1;
+    perror("Ошибка getsockname");
+    close(sockfd);
+    exit(EXIT_FAILURE);
   }
-  port = ntohs(server_addr.sin_port);
-  std::cout << "Server running on port: " << port << std::endl;
-  std::cout.flush(); // Принудительный сброс буфера
+  printf("Сервер слушает на порту: %d\n", ntohs(server_addr.sin_port));
 
-  while (true)
+  if (listen(sockfd, BACKLOG) < 0)
   {
-    // Прием данных от клиента
-    int n = recvfrom(sockfd, buffer, BUFFER_SIZE, 0,
-                     (struct sockaddr *)&client_addr, &addr_len);
-    if (n < 0)
+    perror("Ошибка listen");
+    close(sockfd);
+    exit(EXIT_FAILURE);
+  }
+
+  // Настраиваем обработчик SIGCHLD для завершения зомби-процессов
+  struct sigaction sa;
+  sa.sa_handler = sigchld_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESTART; // Перезапуск системных вызовов
+  if (sigaction(SIGCHLD, &sa, NULL) < 0)
+  {
+    perror("Ошибка sigaction");
+    close(sockfd);
+    exit(EXIT_FAILURE);
+  }
+
+  while (1)
+  {
+    socklen_t client_len = sizeof(client_addr);
+    client_sock = accept(sockfd, (struct sockaddr *)&client_addr, &client_len);
+    if (client_sock < 0)
     {
-      std::cerr << "Receive failed: " << strerror(errno) << std::endl;
+      perror("Ошибка accept");
       continue;
     }
-    buffer[n] = '\0';
 
-    // Вывод информации о клиенте и полученных данных
-    char client_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
-    std::cout << "Received from client " << client_ip << ":"
-              << ntohs(client_addr.sin_port) << ": " << buffer << std::endl;
-    std::cout.flush();
-
-    // Преобразование строки (добавление "[SERVER]" в конец)
-    strcat(buffer, " [SERVER]");
-
-    // Отправка преобразованных данных обратно клиенту
-    sendto(sockfd, buffer, strlen(buffer), 0,
-           (struct sockaddr *)&client_addr, addr_len);
+    pid_t pid = fork();
+    if (pid < 0)
+    {
+      perror("Ошибка fork");
+      close(client_sock);
+      continue;
+    }
+    else if (pid == 0)
+    {
+      close(sockfd); // Дочернему не нужен слушающий сокет
+      handle_client(client_sock);
+    }
+    else
+    {
+      close(client_sock); // Родитель закрывает дескриптор подключенного сокета
+    }
   }
 
   close(sockfd);

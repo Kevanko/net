@@ -1,47 +1,61 @@
-#include <iostream>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-
-#define BUFFER_SIZE 64
+#include <netdb.h>
 
 int main(int argc, char *argv[])
 {
-  if (argc != 3)
+  if (argc != 4)
   {
-    std::cout << "Usage: " << argv[0] << " <server_ip> <port>\n";
-    return 1;
+    fprintf(stderr, "Использование: %s <IP_сервера> <порт_сервера> <число>\n", argv[0]);
+    exit(EXIT_FAILURE);
   }
 
-  int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+  const char *server_ip = argv[1];
+  int server_port = atoi(argv[2]);
+  int number = atoi(argv[3]);
+
+  int sockfd = socket(AF_INET, SOCK_STREAM, 0);
   if (sockfd < 0)
   {
-    std::cerr << "Socket failed\n";
-    return 1;
+    perror("Ошибка создания сокета");
+    exit(EXIT_FAILURE);
   }
 
-  struct sockaddr_in server_addr = {0};
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(atoi(argv[2]));
-  inet_pton(AF_INET, argv[1], &server_addr.sin_addr);
+  struct sockaddr_in serv_addr;
+  memset(&serv_addr, 0, sizeof(serv_addr));
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_port = htons(server_port);
 
-  for (int i = 1; i <= 5; i++)
+  if (inet_pton(AF_INET, server_ip, &serv_addr.sin_addr) <= 0)
   {
-    char buffer[BUFFER_SIZE];
-    snprintf(buffer, BUFFER_SIZE, "Number: %d", i);
-    sendto(sockfd, buffer, strlen(buffer), 0,
-           (struct sockaddr *)&server_addr, sizeof(server_addr));
-    std::cout << "Sent: " << buffer << "\n";
+    perror("Неверный адрес сервера");
+    close(sockfd);
+    exit(EXIT_FAILURE);
+  }
 
-    int n = recvfrom(sockfd, buffer, BUFFER_SIZE - 1, 0, nullptr, nullptr);
-    if (n > 0)
+  if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+  {
+    perror("Ошибка подключения");
+    close(sockfd);
+    exit(EXIT_FAILURE);
+  }
+
+  printf("Подключено к серверу %s:%d\n", server_ip, server_port);
+
+  int iterations = 5;
+  for (int i = 0; i < iterations; i++)
+  {
+    if (write(sockfd, &number, sizeof(number)) < 0)
     {
-      buffer[n] = '\0';
-      std::cout << "Received: " << buffer << "\n";
+      perror("Ошибка отправки данных");
+      close(sockfd);
+      exit(EXIT_FAILURE);
     }
-
-    sleep(i); // Задержка i секунд
+    printf("Отправлено число: %d (итерация %d)\n", number, i + 1);
+    sleep(number);
   }
 
   close(sockfd);
