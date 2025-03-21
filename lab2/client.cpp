@@ -3,7 +3,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <netdb.h>
 
 int main(int argc, char *argv[])
 {

@@ -3,19 +3,15 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <signal.h>
 #include <sys/wait.h>
 
-#define BACKLOG 5 // Максимальное число ожидающих подключений
 
 // Обработчик сигнала SIGCHLD для очистки завершённых дочерних процессов (зомби)
-void sigchld_handler(int sig)
-{
-  while (waitpid(-1, NULL, WNOHANG) > 0)
-    ;
+void reaper( int sig )
+{ int status;
+ while( wait3( &status, WNOHANG, (struct rusage *) 0 ) >= 0 ) ;
 }
+
 
 // Функция обработки клиента в дочернем процессе
 void handle_client(int client_sock)
@@ -26,7 +22,6 @@ void handle_client(int client_sock)
   {
     printf("Получено число: %d\n", number);
     fflush(stdout);
-    // Имитация обработки: задержка на количество секунд, равное полученному числу
     sleep(number);
   }
   close(client_sock);
@@ -39,7 +34,7 @@ int main()
   struct sockaddr_in server_addr, client_addr;
   socklen_t addr_len;
 
-  // Создаем TCP-сокет
+  // Создаем TCP-сокет SOCK_STREAM
   sockfd = socket(AF_INET, SOCK_STREAM, 0);
   if (sockfd < 0)
   {
@@ -67,25 +62,14 @@ int main()
   }
   printf("Сервер слушает на порту: %d\n", ntohs(server_addr.sin_port));
 
-  if (listen(sockfd, BACKLOG) < 0)
+  if (listen(sockfd, 3) < 0)
   {
     perror("Ошибка listen");
     close(sockfd);
     exit(EXIT_FAILURE);
   }
 
-  // Настраиваем обработчик SIGCHLD для завершения зомби-процессов
-  struct sigaction sa;
-  sa.sa_handler = sigchld_handler;
-  sigemptyset(&sa.sa_mask);
-  sa.sa_flags = SA_RESTART; // Перезапуск системных вызовов
-  if (sigaction(SIGCHLD, &sa, NULL) < 0)
-  {
-    perror("Ошибка sigaction");
-    close(sockfd);
-    exit(EXIT_FAILURE);
-  }
-
+  signal( SIGCHLD, reaper);
   while (1)
   {
     socklen_t client_len = sizeof(client_addr);
